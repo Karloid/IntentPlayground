@@ -1,4 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Intent Playground</string>
+    <string name="authenticate">Authenticate</string>
+    <string name="authentication_dropbox">Application needs Dropbox authentication for proper work</string>
+    <string name="success_dropbox_authentication">Successfully authenticated in Dropbox</string>
+    <string name="ok">OK</string>
+    <string name="need_read_storage_permission">Application needs \'Read External Storage\' permission for proper work</string>
+    <string name="queued_photos">%d photos queued</string>
+    <string name="synced_photos">%d synced</string>
+    <string name="all_photos_are_synced">All photos are synced</string>
+    <string name="waiting">Waiting until Android invokes JobService</string>
+    <string name="syncing">Syncing</string>
 </resources>
