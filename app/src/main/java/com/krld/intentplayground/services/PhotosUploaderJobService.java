@@ -9,6 +9,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.os.Looper;
 import android.support.v4.content.LocalBroadcastManager;
 import android.util.Log;
 
@@ -33,8 +34,8 @@ public class PhotosUploaderJobService extends JobService {
     // A pre-built JobInfo we use for scheduling our job.
     private static final JobInfo JOB_INFO;
 
-    private static final int MAX_PHOTOS_PER_ATTEMPT = 25;
-    private static final int MAX_FAILS_PER_ATTEMPT = 4;
+    private static final int MAX_PHOTOS_PER_ATTEMPT = 15;
+    private static final int MAX_FAILS_PER_ATTEMPT = 2;
 
     private static Gson gson = new Gson();
 
@@ -53,7 +54,7 @@ public class PhotosUploaderJobService extends JobService {
     public boolean onStartJob(JobParameters params) {
         Log.i(LOG_TAG, "JOB STARTED!");
 
-        MyApp.getWorkerHandler().post(() -> {
+        MyApp.getStageHandler().post(() -> {
 
             List<String> queuedPhotos = getQueuedPhotos();
             if (queuedPhotos.isEmpty()) {
@@ -62,54 +63,65 @@ public class PhotosUploaderJobService extends JobService {
                 return;
             }
 
-            int initialQueuedCount = queuedPhotos.size();
-            int initialSyncedCount = getSyncedCount();
+            MyApp.getWorkerHandler().post(() -> {
+                int successCount = 0;
+                int failCount = 0;
 
-            List<String> photosToRemove = new ArrayList<>();
-            int successCount = 0;
-            int failCount = 0;
+                broadcastIsSyncing(true);
+                for (String queuedPhoto : queuedPhotos) {
+                    File file = new File(queuedPhoto);
+                    boolean shouldIncrementSynced = false;
+                    boolean fileExists = file.exists();
+                    if (fileExists) {
+                        try {
+                            FileInputStream stream = new FileInputStream(file);
+                            Log.i(LOG_TAG, "Started upload file " + queuedPhoto);
+                            DropboxAPI.Entry response = getDbApi().putFile(file.getName(), stream, file.length(), null, null);
+                            Log.i(LOG_TAG, "The uploaded file's rev is: " + response.rev);
+                            successCount++;
+                            shouldIncrementSynced = true;
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                            failCount++;
+                        }
+                    }
+                    removePhotoFromQueueAndBroadcast(queuedPhoto, shouldIncrementSynced, fileExists);
 
-            broadcastIsSyncing(true);
-            for (String queuedPhoto : queuedPhotos) {
-                File file = new File(queuedPhoto);
-                if (!file.exists()) {
-                    photosToRemove.add(queuedPhoto);
+                    if (successCount == MAX_PHOTOS_PER_ATTEMPT || failCount == MAX_FAILS_PER_ATTEMPT) {
+                        break;
+                    }
                 }
+                broadcastIsSyncing(false);
+                Log.i(LOG_TAG, "Successfully upload " + successCount + " files");
 
-                try {
-                    FileInputStream stream = new FileInputStream(file);
-                    DropboxAPI.Entry response = getDbApi().putFile(file.getName(), stream, file.length(), null, null);
-
-                    Log.i(LOG_TAG, "The uploaded file's rev is: " + response.rev);
-                    successCount++;
-                    photosToRemove.add(queuedPhoto);
-                } catch (Exception e) {
-                    e.printStackTrace();
-                    failCount++;
-                }
-                broadcastCounts(this, initialQueuedCount - successCount - failCount, initialSyncedCount + successCount);
-                if (successCount == MAX_PHOTOS_PER_ATTEMPT || failCount == MAX_FAILS_PER_ATTEMPT) {
-                    break;
-                }
-            }
-            broadcastIsSyncing(false);
-            Log.i(LOG_TAG, "Successfully upload " + successCount + " files");
-
-            if (!photosToRemove.isEmpty()) {
-                queuedPhotos.removeAll(photosToRemove);
-            }
-
-            saveQueuedPhotos(queuedPhotos);
-            saveSyncedCount(successCount + initialSyncedCount);
-
-            MyApp.getMainHandler().post(() -> {
-                if (!queuedPhotos.isEmpty()) {
-                    scheduleJob(this);
-                }
-                jobFinished(params, false);
+                MyApp.getStageHandler().post(() -> {
+                    int queuedCount = getQueuedCount();
+                    MyApp.getMainHandler().post(() -> jobFinished(params, queuedCount > 0));
+                });
             });
         });
         return true;
+    }
+
+    private void removePhotoFromQueueAndBroadcast(String queuedPhoto, boolean successUpload, boolean shouldRemovePhoto) {
+        if (Looper.myLooper() != MyApp.getStageHandler().getLooper()) {
+            MyApp.getStageHandler().post(() -> removePhotoFromQueueAndBroadcast(queuedPhoto, successUpload, shouldRemovePhoto));
+            return;
+        }
+        if (shouldRemovePhoto) {
+            List<String> queuedPhotos = getQueuedPhotos();
+            if (queuedPhotos.remove(queuedPhoto)) {
+                saveQueuedPhotos(queuedPhotos);
+            }
+        }
+
+        int syncedCount = getSyncedCount();
+        if (successUpload) {
+            syncedCount += 1;
+            saveSyncedCount(syncedCount);
+        }
+
+        broadcastCounts(this, getQueuedCount(), syncedCount);
     }
 
     private void broadcastIsSyncing(boolean isSyncing) {
@@ -176,7 +188,7 @@ public class PhotosUploaderJobService extends JobService {
         if (newPhotos == null || newPhotos.isEmpty() || context == null) {
             return;
         }
-        MyApp.getWorkerHandler().post(() -> {
+        MyApp.getStageHandler().post(() -> {
             List<String> queuedPhotos = getQueuedPhotos();
             queuedPhotos.addAll(newPhotos);
             broadcastCounts(context, queuedPhotos.size(), getSyncedCount());
@@ -187,9 +199,9 @@ public class PhotosUploaderJobService extends JobService {
 
     //TODO move data access methods to separate class?
     @SuppressLint("CommitPrefEdits")
-    private static void saveQueuedPhotos(List<String> pendingPhotos) {
-        MyApp.getInstance().getSharedPrefs().edit().putString(Constants.SP_QUEUED_PHOTOS, gson.toJson(pendingPhotos)).commit();
-        MyApp.getInstance().getSharedPrefs().edit().putInt(Constants.SP_QUEUED_PHOTOS_COUNT, pendingPhotos.size()).commit();
+    private static void saveQueuedPhotos(List<String> queuedPhotos) {
+        MyApp.getInstance().getSharedPrefs().edit().putString(Constants.SP_QUEUED_PHOTOS, gson.toJson(queuedPhotos)).commit();
+        MyApp.getInstance().getSharedPrefs().edit().putInt(Constants.SP_QUEUED_PHOTOS_COUNT, queuedPhotos.size()).commit();
     }
 
     public static int getQueuedCount() {

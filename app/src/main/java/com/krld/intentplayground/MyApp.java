@@ -8,6 +8,7 @@ import android.os.HandlerThread;
 
 public class MyApp extends Application {
     private static Handler mainHandler;
+    private static Handler stageHandler;
     private static Handler workerHandler;
     private static MyApp instance;
 
@@ -18,9 +19,17 @@ public class MyApp extends Application {
 
         mainHandler = new Handler();
 
-        HandlerThread thread = new HandlerThread("Worker");
+        HandlerThread thread = new HandlerThread("Stage");
+        thread.start();
+        stageHandler = new Handler(thread.getLooper());
+
+        thread = new HandlerThread("Worker");
         thread.start();
         workerHandler = new Handler(thread.getLooper());
+    }
+
+    public static Handler getStageHandler() {
+        return stageHandler;
     }
 
     public static Handler getWorkerHandler() {
