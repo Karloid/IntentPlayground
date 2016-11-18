@@ -51,7 +51,7 @@ public class PhotosUploaderJobService extends JobService {
 
     @Override
     public boolean onStartJob(JobParameters params) {
-        Log.i(LOG_TAG, "onStartJob");
+        Log.i(LOG_TAG, "JOB STARTED!");
 
         MyApp.getWorkerHandler().post(() -> {
 
