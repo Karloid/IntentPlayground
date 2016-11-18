@@ -42,6 +42,8 @@ public class PhotosUploaderJobService extends JobService {
         ComponentName serviceName = new ComponentName("com.krld.intentplayground", PhotosUploaderJobService.class.getName());
         JOB_INFO = new JobInfo.Builder(Constants.PHOTOS_UPLOAD_JOB_ID, serviceName)
                 .setRequiredNetworkType(JobInfo.NETWORK_TYPE_NOT_ROAMING)
+                /*.setRequiredNetworkType(JobInfo.NETWORK_TYPE_UNMETERED) uncomment for decrease battery consumption
+                .setRequiresCharging(true)*/
                 .build();
     }
 
